@@ -20,7 +20,7 @@ void define_grammar() {
   // define the grammar for this language
   mpca_lang(MPC_LANG_DEFAULT,
       " \
-        number: /-?[0-9]+/ ; \
+        number: /-?[0-9]+(\\.[0-9]+)?/ ; \
         operator: '+' | '-' | '*' | '/' | '%' | \
           \"add\" | \"sub\" | \"mul\" | \"div\" | \"mod\" ; \
         expr: <number> | '(' <operator> <expr>+ ')' ; \
