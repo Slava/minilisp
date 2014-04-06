@@ -8,8 +8,31 @@
 #include <editline/history.h>
 #endif
 
-int main(int argc, char** argv) {
+#include "mpc.h"
 
+mpc_parser_t *Number, *Operator, *Expr, *Program;
+void define_grammar() {
+  Number = mpc_new("number");
+  Operator = mpc_new("operator");
+  Expr = mpc_new("expr");
+  Program = mpc_new("program");
+
+  // define the grammar for this language
+  mpca_lang(MPC_LANG_DEFAULT,
+      " \
+        number: /-?[0-9]+/ ; \
+        operator: '+' | '-' | '*' | '/' ; \
+        expr: <number> | '(' <operator> <expr>+ ')' ; \
+        program: /^/ <operator> <expr>+ /$/ ; \
+      ", Number, Operator, Expr, Program);
+}
+
+void clean_grammar() {
+  // undefine and delete the parsers
+  mpc_cleanup(4, Number, Operator, Expr, Program);
+}
+
+void start_repl() {
   printf("Minilisp Version 0.0.1\n");
   printf("Press Ctrl+c to Exit\n\n");
 
@@ -31,7 +54,12 @@ int main(int argc, char** argv) {
     // free retrived input
     free(input);
   }
+}
 
+int main(int argc, char** argv) {
+  define_grammar();
+  start_repl();
+  clean_grammar();
   return 0;
 }
 
