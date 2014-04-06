@@ -21,7 +21,7 @@ void define_grammar() {
   mpca_lang(MPC_LANG_DEFAULT,
       " \
         number: /-?[0-9]+/ ; \
-        operator: '+' | '-' | '*' | '/' ; \
+        operator: '+' | '-' | '*' | '/' | '%' ; \
         expr: <number> | '(' <operator> <expr>+ ')' ; \
         program: /^/ <operator> <expr>+ /$/ ; \
       ", Number, Operator, Expr, Program);
