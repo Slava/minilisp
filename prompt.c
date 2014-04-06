@@ -48,8 +48,17 @@ void start_repl() {
     // add input to history
     add_history(input);
 
-    // dumb reply
-    printf("No you're a %s\n", input);
+    // attempt to parse the user input
+    mpc_result_t r;
+    if (mpc_parse("<stdin>", input, Program, &r)) {
+      // print the AST
+      mpc_ast_print(r.output);
+      mpc_ast_delete(r.output);
+    } else {
+      // print the error
+      mpc_err_print(r.error);
+      mpc_err_delete(r.error);
+    }
 
     // free retrived input
     free(input);
