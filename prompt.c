@@ -1,7 +1,7 @@
 #include <stdio.h>
+#include <stdlib.h>
 
-// a user limitted input
-static char input[2048];
+#include <editline/readline.h>
 
 int main(int argc, char** argv) {
 
@@ -10,15 +10,21 @@ int main(int argc, char** argv) {
 
   // REPL loop
   while (1) {
-    // prompt
-    fputs("minilisp> ", stdout);
+    // prompt and read the input
+    char* input = readline("minilisp> ");
 
-    // read the user input or break if no input is available
-    if (! fgets(input, 2048, stdin))
+    // break if EOF
+    if (! input)
       break;
 
+    // add input to history
+    add_history(input);
+
     // dumb reply
-    printf("No you're a %s", input);
+    printf("No you're a %s\n", input);
+
+    // free retrived input
+    free(input);
   }
 
   return 0;
