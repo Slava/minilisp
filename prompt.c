@@ -12,9 +12,10 @@ int main(int argc, char** argv) {
   while (1) {
     // prompt
     fputs("minilisp> ", stdout);
-    
-    // read the user input
-    fgets(input, 2048, stdin);
+
+    // read the user input or break if no input is available
+    if (! fgets(input, 2048, stdin))
+      break;
 
     // dumb reply
     printf("No you're a %s", input);
