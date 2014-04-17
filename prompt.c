@@ -35,31 +35,92 @@ void clean_grammar() {
   mpc_cleanup(4, Number, Operator, Expr, Program);
 }
 
-double evaluate_op(char* op, double x, double y) {
-  if (! strcmp(op, "+") || ! strcmp(op, "add"))
-    return x + y;
-  if (! strcmp(op, "-") || ! strcmp(op, "sub"))
-    return x - y;
-  if (! strcmp(op, "*") || ! strcmp(op, "mul"))
-    return x * y;
-  if (! strcmp(op, "/") || ! strcmp(op, "div"))
-    return x / y;
-  if (! strcmp(op, "%") || ! strcmp(op, "mod"))
-    return (double)((long)x % (long)y);
-  if (! strcmp(op, "^") || ! strcmp(op, "pow"))
-    return pow(x, y);
-  if (! strcmp(op, "min"))
-    return fmin(x, y);
-  if (! strcmp(op, "max"))
-    return fmax(x, y);
+typedef struct {
+  int type;
+  double num;
+  int err;
+} lval;
 
-  return 0.0;
+// possible types of lval
+enum { LVAL_NUM, LVAL_ERR };
+
+// possible error types of lval
+enum { LERR_DIV_ZERO, LERR_BAD_OP, LERR_BAD_NUM };
+
+// number factory
+lval lval_num(double x) {
+  lval v;
+  v.type = LVAL_NUM;
+  v.num = x;
+  return v;
 }
 
-double evaluate_ast(mpc_ast_t* ast) {
+// error factory
+lval lval_err(int x) {
+  lval v;
+  v.type = LVAL_ERR;
+  v.err = x;
+  return v;
+}
+
+void lval_print(lval v) {
+  switch (v.type) {
+    case LVAL_NUM:
+      printf("%lf", v.num);
+      break;
+    case LVAL_ERR:
+      switch (v.err) {
+        case LERR_DIV_ZERO:
+          printf("Error: Division By Zero!");
+          break;
+        case LERR_BAD_OP:
+          printf("Error: Invalid Operator!");
+          break;
+        case LERR_BAD_NUM:
+          printf("Error: Invalid Number!");
+          break;
+      }
+
+      break;
+  }
+}
+
+void lval_println(lval v) { lval_print(v); putchar('\n'); }
+
+lval evaluate_op(char* op, lval x, lval y) {
+  // if either of operands is an error, return it
+  if (x.type == LVAL_ERR) return x;
+  if (y.type == LVAL_ERR) return y;
+
+
+  if (! strcmp(op, "+") || ! strcmp(op, "add"))
+    return lval_num(x.num + y.num);
+  if (! strcmp(op, "-") || ! strcmp(op, "sub"))
+    return lval_num(x.num - y.num);
+  if (! strcmp(op, "*") || ! strcmp(op, "mul"))
+    return lval_num(x.num * y.num);
+  if (! strcmp(op, "/") || ! strcmp(op, "div")) {
+    // restrict the division by zero, even for doubles for now
+    if (y.num == 0.0)
+      return lval_err(LERR_DIV_ZERO);
+    return lval_num(x.num / y.num);
+  }
+  if (! strcmp(op, "%") || ! strcmp(op, "mod"))
+    return lval_num((double)((long)x.num % (long)y.num));
+  if (! strcmp(op, "^") || ! strcmp(op, "pow"))
+    return lval_num(pow(x.num, y.num));
+  if (! strcmp(op, "min"))
+    return lval_num(fmin(x.num, y.num));
+  if (! strcmp(op, "max"))
+    return lval_num(fmax(x.num, y.num));
+
+  return lval_err(LERR_BAD_OP);
+}
+
+lval evaluate_ast(mpc_ast_t* ast) {
   // if tagged as number return it directly
   if (strstr(ast->tag, "number")) {
-    return atof(ast->contents);
+    return lval_num(atof(ast->contents));
   }
 
   // this is an expression, evaluate it
@@ -68,7 +129,7 @@ double evaluate_ast(mpc_ast_t* ast) {
   int i_operand = 2;
 
   // the intermediate result
-  double res = evaluate_ast(ast->children[i_operand++]);
+  lval res = evaluate_ast(ast->children[i_operand++]);
 
   while (strstr(ast->children[i_operand]->tag, "expr")) {
     res = evaluate_op(op, res, evaluate_ast(ast->children[i_operand]));
@@ -98,8 +159,8 @@ void start_repl() {
     mpc_result_t r;
     if (mpc_parse("<stdin>", input, Program, &r)) {
       // print the result of evaluation
-      double result = evaluate_ast(r.output);
-      printf("%lf\n", result);
+      lval result = evaluate_ast(r.output);
+      lval_println(result);
       mpc_ast_delete(r.output);
     } else {
       // print the error
