@@ -105,8 +105,11 @@ lval evaluate_op(char* op, lval x, lval y) {
       return lval_err(LERR_DIV_ZERO);
     return lval_num(x.num / y.num);
   }
-  if (! strcmp(op, "%") || ! strcmp(op, "mod"))
+  if (! strcmp(op, "%") || ! strcmp(op, "mod")) {
+    if (y.num == 0.0)
+      return lval_err(LERR_DIV_ZERO);
     return lval_num((double)((long)x.num % (long)y.num));
+  }
   if (! strcmp(op, "^") || ! strcmp(op, "pow"))
     return lval_num(pow(x.num, y.num));
   if (! strcmp(op, "min"))
