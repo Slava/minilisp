@@ -111,13 +111,33 @@ lval *lval_add(lval *v, lval *x) {
   return v;
 }
 
+lval *lval_pop(lval *v, int i) {
+  lval *x = v->cell[i];
+
+  // shift the array inplace removing a reference to i-th element
+  memmove(&v->cell[i], &v->cell[i + 1], sizeof(lval*) * (v->count-i-1));
+
+  // decrease the count
+  v->count--;
+
+  // reallocate the memory used (as we removed one element)
+  v->cell = realloc(v->cell, sizeof(lval*) * v->count);
+  return x;
+}
+
+lval *lval_take(lval *v, int i) {
+  lval* x = lval_pop(v, i);
+  lval_del(v);
+  return x;
+}
+
 lval *lval_read_num(mpc_ast_t *t) {
   double x;
   int read = sscanf(t->contents, "%lf", &x);
-  return read > 0 ? lval_num(x) : lval_err("invalid number");
+  return read > 0 ? lval_num(x) : lval_err("Invalid number.");
 }
 
-lval* lval_read(mpc_ast_t* t) {
+lval *lval_read(mpc_ast_t* t) {
   // for atoms, like numbers or symbols, just create a val of this type
   if (strstr(t->tag, "number")) { return lval_read_num(t); }
   if (strstr(t->tag, "symbol")) { return lval_sym(t->contents); }
@@ -171,63 +191,110 @@ void lval_print(lval* v) {
 
 void lval_println(lval *v) { lval_print(v); putchar('\n'); }
 
-lval evaluate_op(char* op, lval x, lval y) {
-  /*
+lval *evaluate_op(char* op, lval *x, lval *y) {
   // if either of operands is an error, return it
-  if (x.type == LVAL_ERR) return x;
-  if (y.type == LVAL_ERR) return y;
+  if (x->type == LVAL_ERR) return x;
+  if (y->type == LVAL_ERR) return y;
 
 
   if (! strcmp(op, "+") || ! strcmp(op, "add"))
-    return lval_num(x.num + y.num);
+    return lval_num(x->num + y->num);
   if (! strcmp(op, "-") || ! strcmp(op, "sub"))
-    return lval_num(x.num - y.num);
+    return lval_num(x->num - y->num);
   if (! strcmp(op, "*") || ! strcmp(op, "mul"))
-    return lval_num(x.num * y.num);
+    return lval_num(x->num * y->num);
   if (! strcmp(op, "/") || ! strcmp(op, "div")) {
     // restrict the division by zero, even for doubles for now
-    if (y.num == 0.0)
-      return lval_err(LERR_DIV_ZERO);
-    return lval_num(x.num / y.num);
+    if (y->num == 0.0)
+      return lval_err("Division by zero when trying to to divide.");
+    return lval_num(x->num / y->num);
   }
   if (! strcmp(op, "%") || ! strcmp(op, "mod")) {
-    if (y.num == 0.0)
-      return lval_err(LERR_DIV_ZERO);
-    return lval_num((double)((long)x.num % (long)y.num));
+    if (y->num == 0.0)
+      return lval_err("Division by zero when trying to take mod.");
+    return lval_num((double)((long)x->num % (long)y->num));
   }
   if (! strcmp(op, "^") || ! strcmp(op, "pow"))
-    return lval_num(pow(x.num, y.num));
+    return lval_num(pow(x->num, y->num));
   if (! strcmp(op, "min"))
-    return lval_num(fmin(x.num, y.num));
+    return lval_num(fmin(x->num, y->num));
   if (! strcmp(op, "max"))
-    return lval_num(fmax(x.num, y.num));
+    return lval_num(fmax(x->num, y->num));
 
-  return lval_err(LERR_BAD_OP);
-  */
+  return lval_err("Bad operator.");
 }
 
-lval evaluate_ast(mpc_ast_t* ast) {
-  /*
-  // if tagged as number return it directly
-  if (strstr(ast->tag, "number")) {
-    return lval_num(atof(ast->contents));
+lval *builtin_op(lval *args, char *op) {
+  // all arguments should be numbers
+  for (int i = 0; i < args->count; i++)
+    if (args->cell[i]->type != LVAL_NUM) {
+      lval_del(args);
+      return lval_err("Cannot operate on non-numbers.");
+    }
+
+  // use the first argument as the base
+  lval *res = lval_pop(args, 0);
+
+  // Special case for unary minus:
+  if (args->count == 0 && strcmp("-", op) == 0)
+    res->num = -res->num;
+
+  while (args->count > 0) {
+    lval *x = lval_pop(args, 0);
+    lval *newRes = evaluate_op(op, res, x);
+    lval_del(res);
+    lval_del(x);
+
+    res = newRes;
+    if (res->type == LVAL_ERR)
+      break;
   }
 
-  // this is an expression, evaluate it
-  // ( operator ... )
-  char* op = ast->children[1]->contents;
-  int i_operand = 2;
-
-  // the intermediate result
-  lval res = evaluate_ast(ast->children[i_operand++]);
-
-  while (strstr(ast->children[i_operand]->tag, "expr")) {
-    res = evaluate_op(op, res, evaluate_ast(ast->children[i_operand]));
-    i_operand++;
-  }
-
+  lval_del(args);
   return res;
-  */
+}
+
+lval *lval_eval_sexpr(lval *sexpr) {
+  // evaluate all the children first
+  for (int i = 0; i < sexpr->count; i++)
+    sexpr->cell[i] = lval_eval_sexpr(sexpr->cell[i]);
+
+  // check if any of the children evaluations returned an error
+  for (int i = 0; i < sexpr->count; i++)
+    if (sexpr->cell[i]->type == LVAL_ERR)
+      return lval_take(sexpr, i);
+
+  // an empty expression is resulted into an empty expression:
+  // () -> ()
+  if (sexpr->count == 0)
+    return sexpr;
+
+  // expression with a single children is resulted into this children
+  // (6) -> 6
+  if (sexpr->count == 1)
+    return lval_take(sexpr, 0);
+
+  // (sym arg arg arg ...)
+  // first child should be a symbol
+  lval *op = lval_pop(sexpr, 0);
+
+  if (op->type != LVAL_SYM) {
+    lval_del(op);
+    lval_del(sexpr);
+    return lval_err("S-expression doesn't start with a symbol.");
+  }
+
+  lval *result = builtin_op(sexpr, op->sym);
+  lval_del(op);
+  return result;
+}
+
+lval *lval_eval(lval *v) {
+  // S-expression should be evaluated
+  if (v->type == LVAL_SEXPR)
+    return lval_eval_sexpr(v);
+  // evaluate to itself
+  return v;
 }
 
 void start_repl() {
@@ -251,9 +318,9 @@ void start_repl() {
     if (mpc_parse("<stdin>", input, Program, &r)) {
       // print the result of evaluation
       lval *x = lval_read(r.output);
-      lval_println(x);
-      lval_del(x);
       mpc_ast_delete(r.output);
+      lval_println(lval_eval(x));
+      lval_del(x);
     } else {
       // print the error
       mpc_err_print(r.error);
