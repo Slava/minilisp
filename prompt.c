@@ -11,10 +11,11 @@
 
 #include "mpc.h"
 
-mpc_parser_t *Number, *Operator, *Expr, *Program;
+mpc_parser_t *Number, *Symbol, *Sexpr, *Expr, *Program;
 void define_grammar() {
   Number = mpc_new("number");
-  Operator = mpc_new("operator");
+  Symbol = mpc_new("symbol");
+  Sexpr = mpc_new("sexpr");
   Expr = mpc_new("expr");
   Program = mpc_new("program");
 
@@ -22,72 +23,156 @@ void define_grammar() {
   mpca_lang(MPC_LANG_DEFAULT,
       " \
         number: /-?[0-9]+(\\.[0-9]+)?/ ; \
-        operator: '+' | '-' | '*' | '/' | '%' | '^' | \
+        symbol: '+' | '-' | '*' | '/' | '%' | '^' | \
           \"add\" | \"sub\" | \"mul\" | \"div\" | \"mod\" | \"pow\" | \
           \"min\" | \"max\" ; \
-        expr: <number> | '(' <operator> <expr>+ ')' ; \
-        program: /^/ <operator> <expr>+ /$/ ; \
-      ", Number, Operator, Expr, Program);
+        sexpr: '(' <expr>* ')' ; \
+        expr: <number> | <symbol> | <sexpr> ; \
+        program: /^/ <expr>* /$/ ; \
+      ", Number, Symbol, Sexpr, Expr, Program);
 }
 
 void clean_grammar() {
   // undefine and delete the parsers
-  mpc_cleanup(4, Number, Operator, Expr, Program);
+  mpc_cleanup(5, Number, Symbol, Sexpr, Expr, Program);
 }
 
-typedef struct {
+typedef struct lval {
   int type;
   double num;
-  int err;
+
+  // Error and symbol are represented by strings
+  char *err;
+  char *sym;
+
+  // A list of lval and the number of elements in the list
+  int count;
+  struct lval** cell;
 } lval;
 
 // possible types of lval
-enum { LVAL_NUM, LVAL_ERR };
-
-// possible error types of lval
-enum { LERR_DIV_ZERO, LERR_BAD_OP, LERR_BAD_NUM };
+enum { LVAL_NUM, LVAL_ERR, LVAL_SYM, LVAL_SEXPR };
 
 // number factory
-lval lval_num(double x) {
-  lval v;
-  v.type = LVAL_NUM;
-  v.num = x;
+lval *lval_num(double x) {
+  lval *v = malloc(sizeof(lval));
+  v->type = LVAL_NUM;
+  v->num = x;
   return v;
 }
 
 // error factory
-lval lval_err(int x) {
-  lval v;
-  v.type = LVAL_ERR;
-  v.err = x;
+lval *lval_err(char *m) {
+  lval *v = malloc(sizeof(lval));
+  v->type = LVAL_ERR;
+  v->err = malloc(strlen(m) + 1);
+  strcpy(v->err, m);
   return v;
 }
 
-void lval_print(lval v) {
-  switch (v.type) {
-    case LVAL_NUM:
-      printf("%lf", v.num);
-      break;
-    case LVAL_ERR:
-      switch (v.err) {
-        case LERR_DIV_ZERO:
-          printf("Error: Division By Zero!");
-          break;
-        case LERR_BAD_OP:
-          printf("Error: Invalid Operator!");
-          break;
-        case LERR_BAD_NUM:
-          printf("Error: Invalid Number!");
-          break;
-      }
+// symbol factory
+lval *lval_sym(char *s) {
+  lval *v = malloc(sizeof(lval));
+  v->type = LVAL_SYM;
+  v->sym = malloc(strlen(s) + 1);
+  strcpy(v->sym, s);
+  return v;
+}
 
+// s-expr factory
+lval *lval_sexpr() {
+  lval *v = malloc(sizeof(lval));
+  v->type = LVAL_SEXPR;
+  v->count = 0;
+  v->cell = NULL;
+  return v;
+}
+
+void lval_del(lval *v) {
+  switch (v->type) {
+    case LVAL_NUM: break;
+    case LVAL_ERR: free(v->err); break;
+    case LVAL_SYM: free(v->sym); break;
+    case LVAL_SEXPR:
+      for (int i = 0; i < v->count; i++)
+        lval_del(v->cell[i]);
+      free(v->cell);
       break;
+  }
+
+  free(v);
+}
+
+// add a new element x to v's list
+lval *lval_add(lval *v, lval *x) {
+  v->count++;
+  v->cell = realloc(v->cell, sizeof(lval*) * v->count);
+  v->cell[v->count - 1] = x;
+  return v;
+}
+
+lval *lval_read_num(mpc_ast_t *t) {
+  double x;
+  int read = sscanf(t->contents, "%lf", &x);
+  return read > 0 ? lval_num(x) : lval_err("invalid number");
+}
+
+lval* lval_read(mpc_ast_t* t) {
+  // for atoms, like numbers or symbols, just create a val of this type
+  if (strstr(t->tag, "number")) { return lval_read_num(t); }
+  if (strstr(t->tag, "symbol")) { return lval_sym(t->contents); }
+
+  // otherwise it is either root or sexpr for s-expression
+  lval* x = NULL;
+  if (strcmp(t->tag, ">") == 0) { x = lval_sexpr(); }
+  if (strstr(t->tag, "sexpr"))  { x = lval_sexpr(); }
+
+  // recursively add valid expressions of s-expression
+  for (int i = 0; i < t->children_num; i++) {
+    if (strcmp(t->children[i]->contents, "(") == 0) { continue; }
+    if (strcmp(t->children[i]->contents, ")") == 0) { continue; }
+    if (strcmp(t->children[i]->contents, "}") == 0) { continue; }
+    if (strcmp(t->children[i]->contents, "{") == 0) { continue; }
+    if (strcmp(t->children[i]->tag,  "regex") == 0) { continue; }
+    x = lval_add(x, lval_read(t->children[i]));
+  }
+
+  return x;
+}
+
+void lval_print(lval*);
+void lval_expr_print(lval* v, char open, char close) {
+  putchar(open);
+
+  // print the whole list
+  for (int i = 0; i < v->count; i++) {
+    lval_print(v->cell[i]);
+
+    // no whitespace after the last element in the list
+    if (i != v->count - 1)
+      putchar(' ');
+  }
+  putchar(close);
+}
+
+void lval_print(lval* v) {
+  switch (v->type) {
+    case LVAL_NUM:
+      printf("%lf", v->num); break;
+    case LVAL_ERR:
+      printf("Error: %s", v->err); break;
+    case LVAL_SYM:
+      printf("%s", v->sym); break;
+    case LVAL_SEXPR:
+      lval_expr_print(v, '(', ')'); break;
   }
 }
 
-void lval_println(lval v) { lval_print(v); putchar('\n'); }
+
+void lval_println(lval *v) { lval_print(v); putchar('\n'); }
 
 lval evaluate_op(char* op, lval x, lval y) {
+  /*
   // if either of operands is an error, return it
   if (x.type == LVAL_ERR) return x;
   if (y.type == LVAL_ERR) return y;
@@ -118,9 +203,11 @@ lval evaluate_op(char* op, lval x, lval y) {
     return lval_num(fmax(x.num, y.num));
 
   return lval_err(LERR_BAD_OP);
+  */
 }
 
 lval evaluate_ast(mpc_ast_t* ast) {
+  /*
   // if tagged as number return it directly
   if (strstr(ast->tag, "number")) {
     return lval_num(atof(ast->contents));
@@ -140,6 +227,7 @@ lval evaluate_ast(mpc_ast_t* ast) {
   }
 
   return res;
+  */
 }
 
 void start_repl() {
@@ -162,8 +250,9 @@ void start_repl() {
     mpc_result_t r;
     if (mpc_parse("<stdin>", input, Program, &r)) {
       // print the result of evaluation
-      lval result = evaluate_ast(r.output);
-      lval_println(result);
+      lval *x = lval_read(r.output);
+      lval_println(x);
+      lval_del(x);
       mpc_ast_delete(r.output);
     } else {
       // print the error
