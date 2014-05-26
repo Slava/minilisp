@@ -11,11 +11,12 @@
 
 #include "mpc.h"
 
-mpc_parser_t *Number, *Symbol, *Sexpr, *Expr, *Program;
+mpc_parser_t *Number, *Symbol, *Sexpr, *Qexpr, *Expr, *Program;
 void define_grammar() {
   Number = mpc_new("number");
   Symbol = mpc_new("symbol");
   Sexpr = mpc_new("sexpr");
+  Qexpr = mpc_new("qexpr");
   Expr = mpc_new("expr");
   Program = mpc_new("program");
 
@@ -27,14 +28,15 @@ void define_grammar() {
           \"add\" | \"sub\" | \"mul\" | \"div\" | \"mod\" | \"pow\" | \
           \"min\" | \"max\" ; \
         sexpr: '(' <expr>* ')' ; \
-        expr: <number> | <symbol> | <sexpr> ; \
+        qexpr: '{' <expr>* '}' ; \
+        expr: <number> | <symbol> | <sexpr> | <qexpr> ; \
         program: /^/ <expr>* /$/ ; \
-      ", Number, Symbol, Sexpr, Expr, Program);
+      ", Number, Symbol, Sexpr, Qexpr, Expr, Program);
 }
 
 void clean_grammar() {
   // undefine and delete the parsers
-  mpc_cleanup(5, Number, Symbol, Sexpr, Expr, Program);
+  mpc_cleanup(6, Number, Symbol, Sexpr, Qexpr, Expr, Program);
 }
 
 typedef struct lval {
@@ -51,7 +53,7 @@ typedef struct lval {
 } lval;
 
 // possible types of lval
-enum { LVAL_NUM, LVAL_ERR, LVAL_SYM, LVAL_SEXPR };
+enum { LVAL_NUM, LVAL_ERR, LVAL_SYM, LVAL_SEXPR, LVAL_QEXPR };
 
 // number factory
 lval *lval_num(double x) {
@@ -91,12 +93,22 @@ lval *lval_sexpr() {
   return v;
 }
 
+// q-expr factory
+lval *lval_qexpr() {
+  lval *v = malloc(sizeof(lval));
+  v->type = LVAL_QEXPR;
+  v->count = 0;
+  v->cell = NULL;
+  return v;
+}
+
 void lval_del(lval *v) {
   switch (v->type) {
     case LVAL_NUM: break;
     case LVAL_ERR: free(v->err); break;
     case LVAL_SYM: free(v->sym); break;
     case LVAL_SEXPR:
+    case LVAL_QEXPR:
       for (int i = 0; i < v->count; i++)
         lval_del(v->cell[i]);
 
@@ -150,6 +162,7 @@ lval *lval_read(mpc_ast_t* t) {
   lval* x = NULL;
   if (strcmp(t->tag, ">") == 0) { x = lval_sexpr(); }
   if (strstr(t->tag, "sexpr"))  { x = lval_sexpr(); }
+  if (strstr(t->tag, "qexpr"))  { x = lval_qexpr(); }
 
   // recursively add valid expressions of s-expression
   for (int i = 0; i < t->children_num; i++) {
@@ -189,6 +202,8 @@ void lval_print(lval* v) {
       printf("%s", v->sym); break;
     case LVAL_SEXPR:
       lval_expr_print(v, '(', ')'); break;
+    case LVAL_QEXPR:
+      lval_expr_print(v, '{', '}'); break;
   }
 }
 
@@ -258,10 +273,11 @@ lval *builtin_op(lval *args, char *op) {
   return res;
 }
 
+lval *lval_eval(lval *);
 lval *lval_eval_sexpr(lval *sexpr) {
   // evaluate all the children first
   for (int i = 0; i < sexpr->count; i++)
-    sexpr->cell[i] = lval_eval_sexpr(sexpr->cell[i]);
+    sexpr->cell[i] = lval_eval(sexpr->cell[i]);
 
   // check if any of the children evaluations returned an error
   for (int i = 0; i < sexpr->count; i++)
