@@ -24,11 +24,7 @@ void define_grammar() {
   mpca_lang(MPC_LANG_DEFAULT,
       " \
         number: /-?[0-9]+(\\.[0-9]+)?/ ; \
-        symbol: '+' | '-' | '*' | '/' | '%' | '^' | \
-          \"add\" | \"sub\" | \"mul\" | \"div\" | \"mod\" | \"pow\" | \
-          \"min\" | \"max\" | \
-          \"list\" | \"head\" | \"tail\" | \"join\" | \"eval\" | \
-          \"cons\" | \"len\" ; \
+        symbol: /[a-zA-Z0-9_+\\-*\\/\\\\=<>!&]+/ ; \
         sexpr: '(' <expr>* ')' ; \
         qexpr: '{' <expr>* '}' ; \
         expr: <number> | <symbol> | <sexpr> | <qexpr> ; \
