@@ -26,7 +26,8 @@ void define_grammar() {
         number: /-?[0-9]+(\\.[0-9]+)?/ ; \
         symbol: '+' | '-' | '*' | '/' | '%' | '^' | \
           \"add\" | \"sub\" | \"mul\" | \"div\" | \"mod\" | \"pow\" | \
-          \"min\" | \"max\" ; \
+          \"min\" | \"max\" | \
+          \"list\" | \"head\" | \"tail\" | \"join\" | \"eval\" ; \
         sexpr: '(' <expr>* ')' ; \
         qexpr: '{' <expr>* '}' ; \
         expr: <number> | <symbol> | <sexpr> | <qexpr> ; \
@@ -147,6 +148,14 @@ lval *lval_take(lval *v, int i) {
   return x;
 }
 
+lval *lval_join(lval *x, lval *y) {
+  // one by one put elements from y to x
+  while (y->count > 0)
+    x = lval_add(x, lval_pop(y, 0));
+  lval_del(y);
+  return x;
+}
+
 lval *lval_read_num(mpc_ast_t *t) {
   double x;
   int read = sscanf(t->contents, "%lf", &x);
@@ -209,6 +218,69 @@ void lval_print(lval* v) {
 
 
 void lval_println(lval *v) { lval_print(v); putchar('\n'); }
+
+#define LASSERT(args, cond, err) if (!(cond)) { lval_del(args); return lval_err(err); }
+lval *builtin_head(lval *args) {
+  LASSERT(args, args->count == 1, "HEAD was passed incorrect number of arguments.");
+
+  lval* list = args->cell[0];
+  LASSERT(args, list->type == LVAL_QEXPR, "HEAD was passed incorrect type.");
+
+  LASSERT(args, list->count != 0, "HEAD was passed empty list ({}).");
+
+  // take frees the original args list
+  list = lval_take(args, 0);
+
+  // remove the rest
+  while (list->count > 1)
+    lval_pop(list, 1);
+
+  return list;
+}
+
+lval *builtin_tail(lval *args) {
+  LASSERT(args, args->count == 1, "TAIL was passed incorrect number of arguments.");
+
+  lval* list = args->cell[0];
+  LASSERT(args, list->type == LVAL_QEXPR, "TAIL was passed incorrect type.");
+  LASSERT(args, list->count != 0, "TAIL was passed an empty list ({}).");
+
+  // take frees the original args list
+  list = lval_take(args, 0);
+
+  // remove the head
+  lval_del(lval_pop(list, 0));
+
+  return list;
+}
+
+lval *builtin_list(lval *args) {
+  args->type = LVAL_QEXPR;
+  return args;
+}
+
+lval *lval_eval(lval *);
+lval *builtin_eval(lval *args) {
+  LASSERT(args, args->count == 1, "EVAL was passed incorrect number of arguments.");
+  LASSERT(args, args->cell[0]->type == LVAL_QEXPR, "EVAL was passed incorrect type.");
+
+  lval *list = lval_take(args, 0);
+  list->type = LVAL_SEXPR;
+  return lval_eval(list);
+}
+
+lval *builtin_join(lval *args) {
+  LASSERT(args, args->count != 0, "JOIN was passed 0 arguments.");
+  for (int i = 0; i < args->count; i++)
+    LASSERT(args, args->cell[i]->type == LVAL_QEXPR, "JOIN was passed incorrect type.");
+
+  lval *res = lval_pop(args, 0);
+  while (args->count > 0)
+    res = lval_join(res, lval_pop(args, 0));
+
+  lval_del(args);
+  return res;
+}
 
 lval *evaluate_op(char* op, lval *x, lval *y) {
   // if either of operands is an error, return it
@@ -273,7 +345,15 @@ lval *builtin_op(lval *args, char *op) {
   return res;
 }
 
-lval *lval_eval(lval *);
+lval *builtin(lval *args, char *func) {
+  if (! strcmp(func, "list")) return builtin_list(args);
+  if (! strcmp(func, "head")) return builtin_head(args);
+  if (! strcmp(func, "tail")) return builtin_tail(args);
+  if (! strcmp(func, "eval")) return builtin_eval(args);
+  if (! strcmp(func, "join")) return builtin_join(args);
+  return builtin_op(args, func);
+}
+
 lval *lval_eval_sexpr(lval *sexpr) {
   // evaluate all the children first
   for (int i = 0; i < sexpr->count; i++)
@@ -304,7 +384,7 @@ lval *lval_eval_sexpr(lval *sexpr) {
     return lval_err("S-expression doesn't start with a symbol.");
   }
 
-  lval *result = builtin_op(sexpr, op->sym);
+  lval *result = builtin(sexpr, op->sym);
   lval_del(op);
   return result;
 }
