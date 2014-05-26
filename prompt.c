@@ -57,6 +57,7 @@ enum { LVAL_NUM, LVAL_ERR, LVAL_SYM, LVAL_SEXPR };
 lval *lval_num(double x) {
   lval *v = malloc(sizeof(lval));
   v->type = LVAL_NUM;
+  v->count = 0;
   v->num = x;
   return v;
 }
@@ -65,6 +66,7 @@ lval *lval_num(double x) {
 lval *lval_err(char *m) {
   lval *v = malloc(sizeof(lval));
   v->type = LVAL_ERR;
+  v->count = 0;
   v->err = malloc(strlen(m) + 1);
   strcpy(v->err, m);
   return v;
@@ -74,6 +76,7 @@ lval *lval_err(char *m) {
 lval *lval_sym(char *s) {
   lval *v = malloc(sizeof(lval));
   v->type = LVAL_SYM;
+  v->count = 0;
   v->sym = malloc(strlen(s) + 1);
   strcpy(v->sym, s);
   return v;
@@ -96,6 +99,7 @@ void lval_del(lval *v) {
     case LVAL_SEXPR:
       for (int i = 0; i < v->count; i++)
         lval_del(v->cell[i]);
+
       free(v->cell);
       break;
   }
@@ -318,9 +322,10 @@ void start_repl() {
     if (mpc_parse("<stdin>", input, Program, &r)) {
       // print the result of evaluation
       lval *x = lval_read(r.output);
-      mpc_ast_delete(r.output);
-      lval_println(lval_eval(x));
+      x = lval_eval(x);
+      lval_println(x);
       lval_del(x);
+      mpc_ast_delete(r.output);
     } else {
       // print the error
       mpc_err_print(r.error);
