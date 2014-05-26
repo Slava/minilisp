@@ -37,21 +37,30 @@ void clean_grammar() {
   mpc_cleanup(6, Number, Symbol, Sexpr, Qexpr, Expr, Program);
 }
 
-typedef struct lval {
+struct lval;
+struct lenv;
+typedef struct lval lval;
+typedef struct lenv lenv;
+
+typedef lval* (*lbuiltin)(lenv*, lval*);
+
+struct lval {
   int type;
   double num;
 
   // Error and symbol are represented by strings
   char *err;
   char *sym;
+  // Function is represented by a function pointer
+  lbuiltin fun;
 
   // A list of lval and the number of elements in the list
   int count;
   struct lval** cell;
-} lval;
+};
 
 // possible types of lval
-enum { LVAL_NUM, LVAL_ERR, LVAL_SYM, LVAL_SEXPR, LVAL_QEXPR };
+enum { LVAL_NUM, LVAL_ERR, LVAL_SYM, LVAL_FUN, LVAL_SEXPR, LVAL_QEXPR };
 
 // number factory
 lval *lval_num(double x) {
@@ -82,6 +91,15 @@ lval *lval_sym(char *s) {
   return v;
 }
 
+// function factory
+lval *lval_fun(lbuiltin f) {
+  lval *v = malloc(sizeof(lval));
+  v->type = LVAL_FUN;
+  v->count = 0;
+  v->fun = f;
+  return v;
+}
+
 // s-expr factory
 lval *lval_sexpr() {
   lval *v = malloc(sizeof(lval));
@@ -105,6 +123,7 @@ void lval_del(lval *v) {
     case LVAL_NUM: break;
     case LVAL_ERR: free(v->err); break;
     case LVAL_SYM: free(v->sym); break;
+    case LVAL_FUN: break;
     case LVAL_SEXPR:
     case LVAL_QEXPR:
       for (int i = 0; i < v->count; i++)
@@ -151,6 +170,36 @@ lval *lval_join(lval *x, lval *y) {
     x = lval_add(x, lval_pop(y, 0));
   lval_del(y);
   return x;
+}
+
+// deep copy of the value passed in
+lval *lval_copy(lval *x) {
+  lval *c = malloc(sizeof(lval));
+  c->type = x->type;
+
+  switch (x->type) {
+    case LVAL_NUM:
+      c->num = x->num; break;
+    case LVAL_ERR:
+      c->err = malloc(strlen(x->err) + 1);
+      strcpy(c->err, x->err);
+      break;
+    case LVAL_SYM:
+      c->sym = malloc(strlen(x->sym) + 1);
+      strcpy(c->sym, x->sym);
+      break;
+    case LVAL_FUN:
+      c->fun = x->fun; break;
+    case LVAL_SEXPR:
+    case LVAL_QEXPR:
+      c->count = x->count;
+      c->cell = malloc(sizeof(lval*) * c->count);
+      for (int i = 0; i < x->count; i++)
+        c->cell[i] = lval_copy(x->cell[i]);
+      break;
+  }
+
+  return c;
 }
 
 lval *lval_read_num(mpc_ast_t *t) {
@@ -206,6 +255,8 @@ void lval_print(lval* v) {
       printf("Error: %s", v->err); break;
     case LVAL_SYM:
       printf("%s", v->sym); break;
+    case LVAL_FUN:
+      printf("<function>"); break;
     case LVAL_SEXPR:
       lval_expr_print(v, '(', ')'); break;
     case LVAL_QEXPR:
