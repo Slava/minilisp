@@ -27,7 +27,8 @@ void define_grammar() {
         symbol: '+' | '-' | '*' | '/' | '%' | '^' | \
           \"add\" | \"sub\" | \"mul\" | \"div\" | \"mod\" | \"pow\" | \
           \"min\" | \"max\" | \
-          \"list\" | \"head\" | \"tail\" | \"join\" | \"eval\" ; \
+          \"list\" | \"head\" | \"tail\" | \"join\" | \"eval\" | \
+          \"cons\" | \"len\" ; \
         sexpr: '(' <expr>* ')' ; \
         qexpr: '{' <expr>* '}' ; \
         expr: <number> | <symbol> | <sexpr> | <qexpr> ; \
@@ -282,6 +283,28 @@ lval *builtin_join(lval *args) {
   return res;
 }
 
+lval *builtin_cons(lval *args) {
+  LASSERT(args, args->count == 2, "CONS was passed incorrect number of arguments.");
+  LASSERT(args, args->cell[1]->type == LVAL_QEXPR, "CONS was passed incorrect type.");
+
+  lval *val = lval_pop(args, 0);
+  lval *list = lval_pop(args, 0);
+  lval *res = lval_qexpr();
+  lval_del(args);
+
+  return lval_join(lval_add(res, val), list);
+}
+
+lval *builtin_len(lval *args) {
+  LASSERT(args, args->count == 1, "LEN was passed incorrect number of arguments.");
+  LASSERT(args, args->cell[0]->type == LVAL_QEXPR, "LEn was passed incorrect type.");
+
+  lval *res = lval_num(args->cell[0]->count);
+  lval_del(args);
+
+  return res;
+}
+
 lval *evaluate_op(char* op, lval *x, lval *y) {
   // if either of operands is an error, return it
   if (x->type == LVAL_ERR) return x;
@@ -351,6 +374,8 @@ lval *builtin(lval *args, char *func) {
   if (! strcmp(func, "tail")) return builtin_tail(args);
   if (! strcmp(func, "eval")) return builtin_eval(args);
   if (! strcmp(func, "join")) return builtin_join(args);
+  if (! strcmp(func, "cons")) return builtin_cons(args);
+  if (! strcmp(func, "len")) return builtin_len(args);
   return builtin_op(args, func);
 }
 
